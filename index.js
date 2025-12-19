@@ -4,53 +4,52 @@ const { GoogleSpreadsheet } = require('google-spreadsheet');
 const { JWT } = require('google-auth-library');
 const creds = require('./google-creds.json');
 
-// --- НАСТРОЙКИ ---
+// --- НАЛАШТУВАННЯ ---
 const SPREADSHEET_ID = process.env.SPREADSHEET_ID;
-const SHEET_TITLE = 'Отчеты';
+const SHEET_TITLE = 'Звіти'; // ВАЖЛИВО: Назва аркуша в таблиці має бути такою ж!
 
-// --- КЛАВИАТУРЫ ---
+// --- КЛАВІАТУРИ ---
 const mainMenu = Markup.keyboard([
-    ['Добавить заказ', 'Погасить долг'], // Добавили кнопку сюда
-    ['Поиск по номеру', 'Отчеты']
+    ['Додати замовлення', 'Погасити борг'],
+    ['Пошук за номером', 'Звіти']
 ]).resize();
 
 const reportsMenu = Markup.keyboard([
-    ['За сегодня', 'За неделю'], // Второй уровень
+    ['За сьогодні', 'За тиждень'],
     ['Назад']
 ]).resize();
 
-// --- ВСПОМОГАТЕЛЬНЫЕ ФУНКЦИИ ДЛЯ ДАТ ---
+// --- ДОПОМІЖНІ ФУНКЦІЇ ДЛЯ ДАТ ---
 
-// Превращаем строку "19.12.2025" в настоящий объект даты JavaScript
+// Перетворюємо рядок "19.12.2025" на справжній об'єкт дати JavaScript
 function parseDate(dateStr) {
     if (!dateStr) return null;
     const [day, month, year] = dateStr.split('.');
-    // Месяцы в JS начинаются с 0 (январь - 0)
+    // Місяці в JS починаються з 0 (січень - 0)
     return new Date(year, month - 1, day);
 }
 
-// Проверка: входит ли дата в текущую неделю (Пн - Вс)
+// Перевірка: чи входить дата в поточний тиждень (Пн - Нд)
 function isThisWeek(dateObj) {
     const now = new Date();
-    const currentDay = now.getDay(); // 0 (Вс) ... 6 (Сб)
+    const currentDay = now.getDay(); // 0 (Нд) ... 6 (Сб)
     
-    // Вычисляем понедельник текущей недели
-    // Если сегодня Вс (0), то отнимаем 6 дней. Если Пн (1) - 0 дней.
+    // Обчислюємо понеділок поточного тижня
     const distanceToMonday = currentDay === 0 ? 6 : currentDay - 1;
     
     const monday = new Date(now);
     monday.setDate(now.getDate() - distanceToMonday);
-    monday.setHours(0, 0, 0, 0); // Обнуляем время
+    monday.setHours(0, 0, 0, 0); // Обнуляємо час
 
-    // Вычисляем конец недели (следующий понедельник)
+    // Обчислюємо кінець тижня (наступний понеділок)
     const nextMonday = new Date(monday);
     nextMonday.setDate(monday.getDate() + 7);
 
-    // Дата должна быть больше или равна Понедельнику И меньше следующего Понедельника
+    // Дата має бути більша або дорівнювати Понеділку І менша за наступний Понеділок
     return dateObj >= monday && dateObj < nextMonday;
 }
 
-// --- ФУНКЦИЯ ЧТЕНИЯ ТАБЛИЦЫ (Общая для всех отчетов) ---
+// --- ФУНКЦІЯ ЧИТАННЯ ТАБЛИЦІ (Спільна для всіх звітів) ---
 async function getRows() {
     const serviceAccountAuth = new JWT({
         email: creds.client_email,
@@ -60,75 +59,76 @@ async function getRows() {
     const doc = new GoogleSpreadsheet(SPREADSHEET_ID, serviceAccountAuth);
     await doc.loadInfo();
     const sheet = doc.sheetsByTitle[SHEET_TITLE];
+    if (!sheet) throw new Error(`Аркуш "${SHEET_TITLE}" не знайдено. Перевір назву в таблиці!`);
     return await sheet.getRows();
 }
 
-// --- ОТЧЕТ ЗА СЕГОДНЯ ---
+// --- ЗВІТ ЗА СЬОГОДНІ ---
 async function getDailyReport(ctx) {
-    await ctx.reply('🔍 Считаю за сегодня...');
+    await ctx.reply('🔍 Рахую за сьогодні...');
     const rows = await getRows();
-    const today = new Date().toLocaleDateString('ru-RU');
+    const today = new Date().toLocaleDateString('uk-UA'); // Український формат дати
 
-    // Фильтр
+    // Фільтр
     const filteredRows = rows.filter(row => row.get('Дата') === today);
 
-    sendReport(ctx, filteredRows, `за сегодня (${today})`);
+    sendReport(ctx, filteredRows, `за сьогодні (${today})`);
 }
 
-// --- ОТЧЕТ ЗА НЕДЕЛЮ ---
+// --- ЗВІТ ЗА ТИЖДЕНЬ ---
 async function getWeeklyReport(ctx) {
-    await ctx.reply('🔍 Считаю за эту неделю (с понедельника)...');
+    await ctx.reply('🔍 Рахую за цей тиждень (з понеділка)...');
     const rows = await getRows();
 
-    // Фильтр
+    // Фільтр
     const filteredRows = rows.filter(row => {
         const rowDate = parseDate(row.get('Дата'));
         return rowDate && isThisWeek(rowDate);
     });
 
-    sendReport(ctx, filteredRows, 'за текущую неделю');
+    sendReport(ctx, filteredRows, 'за поточний тиждень');
 }
 
-// --- ОБНОВЛЕННАЯ ФУНКЦИЯ ОТЧЕТА ---
+// --- ФУНКЦІЯ ВІДПРАВКИ ЗВІТУ ---
 function sendReport(ctx, rows, periodName) {
     if (rows.length === 0) {
-        return ctx.reply(`📅 Записей ${periodName} не найдено.`, reportsMenu);
+        return ctx.reply(`📅 Записів ${periodName} не знайдено.`, reportsMenu);
     }
 
-    let totalCash = 0; // Живые деньги
-    let totalDebt = 0; // Долги
-    let reportText = `📊 **Отчет ${periodName}:**\n\n`;
+    let totalCash = 0; // Живі гроші
+    let totalDebt = 0; // Борги
+    let reportText = `📊 **Звіт ${periodName}:**\n\n`;
 
     rows.forEach((row, index) => {
         const date = row.get('Дата');
         const car = row.get('Марка');
-        const price = parseInt(row.get('Цена')) || 0;
-        const status = row.get('Статус') || 'Оплачено'; // Если пусто, считаем что оплачено
+        const price = parseInt(row.get('Ціна')) || 0; // Зверни увагу: поле 'Ціна'
+        const status = row.get('Статус') || 'Оплачено';
         
-        // Проверяем статус и считаем разные кассы
+        // Перевіряємо статус і рахуємо різні каси
         let icon = '🟢';
-        if (status.toLowerCase().includes('долг')) {
+        if (status.toLowerCase().includes('борг')) {
             totalDebt += price;
             icon = '🔴';
         } else {
             totalCash += price;
         }
         
-        // Добавляем строчку в отчет
+        // Додаємо рядок у звіт
         reportText += `${index + 1}. ${icon} ${date} | ${car} — ${price}\n`;
     });
 
-    // Итоговая статистика
-    reportText += `\n💰 **Касса (на руках): ${totalCash} грн**`;
+    // Підсумкова статистика
+    reportText += `\n💰 **Каса (на руках): ${totalCash} грн**`;
     if (totalDebt > 0) {
-        reportText += `\n❗️ **В долг: ${totalDebt} грн**`;
-        reportText += `\n🏁 **Всего работ на: ${totalCash + totalDebt} грн**`;
+        reportText += `\n❗️ **В борг: ${totalDebt} грн**`;
+        reportText += `\n🏁 **Всього робіт на: ${totalCash + totalDebt} грн**`;
     }
 
     ctx.reply(reportText, { parse_mode: 'Markdown', ...reportsMenu });
 }
 
-// --- ФУНКЦИЯ ЗАПИСИ (из старого кода) ---
+// --- ФУНКЦІЯ ЗАПИСУ ---
 async function appendToSheet(data) {
     const serviceAccountAuth = new JWT({
         email: creds.client_email,
@@ -138,87 +138,86 @@ async function appendToSheet(data) {
     const doc = new GoogleSpreadsheet(SPREADSHEET_ID, serviceAccountAuth);
     await doc.loadInfo(); 
     const sheet = doc.sheetsByTitle[SHEET_TITLE];
-    if (!sheet) throw new Error(`Лист "${SHEET_TITLE}" не найден.`);
+    if (!sheet) throw new Error(`Аркуш "${SHEET_TITLE}" не знайдено.`);
     await sheet.addRow(data);
 }
 
-// --- СЦЕНА ОПРОСА (ОБНОВЛЕННАЯ) ---
+// --- СЦЕНА ОПИТУВАННЯ ---
 const reportWizard = new Scenes.WizardScene(
     'REPORT_SCENE',
 
-    // ШАГ 1: Марка
+    // КРОК 1: Марка
     (ctx) => {
-        ctx.reply('🚚 Какая машина? (Марка):', Markup.keyboard([['Отмена']]).resize());
+        ctx.reply('🚚 Яка машина? (Марка):', Markup.keyboard([['Скасувати']]).resize());
         ctx.wizard.state.data = {}; 
         return ctx.wizard.next();
     },
 
-    // ШАГ 2: Номер
+    // КРОК 2: Номер
     (ctx) => {
-        if (ctx.message.text === 'Отмена') return leaveScene(ctx);
+        if (ctx.message.text === 'Скасувати') return leaveScene(ctx);
         ctx.wizard.state.data.car = ctx.message.text;
-        ctx.reply('🔢 Какой гос. номер?');
+        ctx.reply('🔢 Який держ. номер?');
         return ctx.wizard.next();
     },
 
-    // ШАГ 3: Работа
+    // КРОК 3: Робота
     (ctx) => {
-        if (ctx.message.text === 'Отмена') return leaveScene(ctx);
+        if (ctx.message.text === 'Скасувати') return leaveScene(ctx);
         ctx.wizard.state.data.number = ctx.message.text;
-        ctx.reply('🛠 Что делали? (Кратко):');
+        ctx.reply('🛠 Що робили? (Коротко):');
         return ctx.wizard.next();
     },
 
-    // ШАГ 4: Цена
+    // КРОК 4: Ціна
     (ctx) => {
-        if (ctx.message.text === 'Отмена') return leaveScene(ctx);
+        if (ctx.message.text === 'Скасувати') return leaveScene(ctx);
         ctx.wizard.state.data.work = ctx.message.text;
-        ctx.reply('💰 Сколько денег? (Только цифры):');
+        ctx.reply('💰 Скільки грошей? (Тільки цифри):');
         return ctx.wizard.next();
     },
 
-    // --- НОВЫЙ ШАГ 5: Статус оплаты ---
+    // КРОК 5: Статус оплати
     (ctx) => {
-        if (ctx.message.text === 'Отмена') return leaveScene(ctx);
+        if (ctx.message.text === 'Скасувати') return leaveScene(ctx);
         ctx.wizard.state.data.price = ctx.message.text;
         
         ctx.reply(
-            '💳 Оплатили сразу или в долг?', 
+            '💳 Оплатили відразу чи в борг?', 
             Markup.keyboard([
-                ['✅ Оплачено', '❗️ Долг'],
-                ['Отмена']
+                ['✅ Оплачено', '❗️ Борг'],
+                ['Скасувати']
             ]).resize()
         );
         return ctx.wizard.next();
     },
 
-    // ШАГ 6: Финал (Запись)
+    // КРОК 6: Фінал (Запис)
     async (ctx) => {
-        if (ctx.message.text === 'Отмена') return leaveScene(ctx);
+        if (ctx.message.text === 'Скасувати') return leaveScene(ctx);
         
-        // Сохраняем статус (убираем эмодзи для красоты в таблице, если хочешь)
         const statusRaw = ctx.message.text;
-        const status = statusRaw.includes('Долг') ? 'Долг' : 'Оплачено';
+        // Перевіряємо, чи є слово "Борг" у відповіді
+        const status = statusRaw.includes('Борг') ? 'Борг' : 'Оплачено';
         
         ctx.wizard.state.data.status = status;
         
         const { car, number, work, price } = ctx.wizard.state.data;
-        const date = new Date().toLocaleDateString('ru-RU');
+        const date = new Date().toLocaleDateString('uk-UA');
 
-        await ctx.reply('⏳ Записываю...');
+        await ctx.reply('⏳ Записую...');
 
         try {
             await appendToSheet({
                 'Дата': date,
                 'Марка': car,
                 'Номер': number,
-                'Работа': work,
-                'Цена': price,
-                'Статус': status // <--- Добавили поле
+                'Робота': work,  // Змінив ключ на український
+                'Ціна': price,   // Змінив ключ на український
+                'Статус': status
             });
             
-            // Формируем красивый ответ с иконкой статуса
-            const statusIcon = status === 'Долг' ? '🔴 ДОЛГ' : '🟢 Оплачено';
+            const statusIcon = status === 'Борг' ? '🔴 БОРГ' : '🟢 Оплачено';
             
             await ctx.reply(
                 `✅ **Записано!**\n${car} ${number}\n💰 ${price} грн\n${statusIcon}`, 
@@ -226,142 +225,135 @@ const reportWizard = new Scenes.WizardScene(
             );
         } catch (e) {
             console.error(e);
-            await ctx.reply('❌ Ошибка записи.', mainMenu);
+            await ctx.reply('❌ Помилка запису.', mainMenu);
         }
 
         return ctx.scene.leave();
     }
 );
-// --- СЦЕНА ПОИСКА ---
+
+// --- СЦЕНА ПОШУКУ ---
 const searchScene = new Scenes.WizardScene(
     'SEARCH_SCENE',
     
-    // Шаг 1: Спрашиваем номер
+    // Крок 1: Питаємо номер
     (ctx) => {
-        ctx.reply('🔍 Введите номер машины (или его часть):', Markup.keyboard([['Отмена']]).resize());
+        ctx.reply('🔍 Введіть номер машини (або частину):', Markup.keyboard([['Скасувати']]).resize());
         return ctx.wizard.next();
     },
 
-    // Шаг 2: Ищем и выводим
+    // Крок 2: Шукаємо
     async (ctx) => {
-        if (ctx.message.text === 'Отмена') return leaveScene(ctx);
+        if (ctx.message.text === 'Скасувати') return leaveScene(ctx);
         
-        const query = ctx.message.text.toLowerCase().trim(); // Приводим к маленьким буквам
-        await ctx.reply(`🔎 Ищу записи с номером "${query}"...`);
+        const query = ctx.message.text.toLowerCase().trim();
+        await ctx.reply(`🔎 Шукаю записи з номером "${query}"...`);
         
         try {
-            const rows = await getRows(); // Берем все записи
+            const rows = await getRows();
             
-            // Фильтруем: проверяем, содержит ли номер то, что ввел пользователь
             const results = rows.filter(row => {
                 const number = row.get('Номер');
-                // Проверка: номер существует И содержит наш запрос
                 return number && number.toLowerCase().includes(query);
             });
 
             if (results.length === 0) {
-                await ctx.reply('🤷‍♂️ Ничего не найдено.', mainMenu);
+                await ctx.reply('🤷‍♂️ Нічого не знайдено.', mainMenu);
             } else {
                 let totalSum = 0;
-                let message = `🚙 **История по запросу "${query}":**\n\n`;
+                let message = `🚙 **Історія за запитом "${query}":**\n\n`;
 
                 results.forEach((row, index) => {
                     const date = row.get('Дата');
                     const car = row.get('Марка');
-                    const work = row.get('Работа');
-                    const price = parseInt(row.get('Цена')) || 0;
+                    const work = row.get('Робота'); // Ключ укр.
+                    const price = parseInt(row.get('Ціна')) || 0; // Ключ укр.
                     
                     totalSum += price;
                     message += `🔹 **${date}** | ${car}\n🛠 ${work} — ${price} грн\n\n`;
                 });
 
-                message += `💰 **Всего потрачено: ${totalSum} грн**`;
+                message += `💰 **Всього витрачено: ${totalSum} грн**`;
                 
-                // Отправляем (если сообщение очень длинное, телеграм может обрезать, но для начала хватит)
                 await ctx.reply(message, { parse_mode: 'Markdown', ...mainMenu });
             }
         } catch (e) {
             console.error(e);
-            await ctx.reply('❌ Ошибка при поиске.', mainMenu);
+            await ctx.reply('❌ Помилка при пошуку.', mainMenu);
         }
         
         return ctx.scene.leave();
     }
 );
 
-// --- СЦЕНА ПОГАШЕНИЯ ДОЛГА ---
+// --- СЦЕНА ПОГАШЕННЯ БОРГУ ---
 const repayScene = new Scenes.WizardScene(
     'REPAY_SCENE',
     
-    // ШАГ 1: Показываем список должников
+    // Крок 1: Показуємо боржників
     async (ctx) => {
-        await ctx.reply('🔍 Ищу неоплаченные заказы...');
+        await ctx.reply('🔍 Шукаю неоплачені замовлення...');
         
-        const rows = await getRows(); // Берем все записи
+        const rows = await getRows();
         
-        // Ищем строки, где статус "Долг" (или содержит слово Долг)
-        // map сохраняет еще и оригинальный номер строки (rowIndex), чтобы мы знали, кого править
         const debts = rows
             .map((row, index) => ({ row, index })) 
             .filter(({ row }) => {
                 const status = row.get('Статус');
-                return status && status.toLowerCase().includes('долг');
+                // Шукаємо слово "борг" (маленькими літерами)
+                return status && status.toLowerCase().includes('борг');
             });
 
         if (debts.length === 0) {
-            await ctx.reply('🎉 Долгов нет! Все оплачено.', mainMenu);
+            await ctx.reply('🎉 Боргів немає! Все оплачено.', mainMenu);
             return ctx.scene.leave();
         }
 
-        // Сохраняем найденные долги в память, чтобы использовать на следующем шаге
         ctx.wizard.state.debts = debts;
 
-        // Создаем кнопки для каждого должника
         const buttons = debts.map(({ row }, i) => {
             const date = row.get('Дата');
             const car = row.get('Марка');
-            const price = row.get('Цена');
-            return [`${i + 1}. ${date} | ${car} — ${price} грн`]; // Текст кнопки
+            const price = row.get('Ціна');
+            return [`${i + 1}. ${date} | ${car} — ${price} грн`];
         });
 
-        buttons.push(['Отмена']); // Кнопка выхода
+        buttons.push(['Скасувати']);
 
         await ctx.reply(
-            'Выберите, кто вернул долг (нажмите на кнопку):', 
+            'Виберіть, хто повернув борг (натисніть кнопку):', 
             Markup.keyboard(buttons).oneTime().resize()
         );
         return ctx.wizard.next();
     },
 
-    // ШАГ 2: Обрабатываем нажатие
+    // Крок 2: Обробка вибору
     async (ctx) => {
-        if (ctx.message.text === 'Отмена') return leaveScene(ctx);
+        if (ctx.message.text === 'Скасувати') return leaveScene(ctx);
 
-        // Пытаемся понять, на какую кнопку нажали (берем номер в начале "1. ...")
         const choiceIndex = parseInt(ctx.message.text.split('.')[0]) - 1;
         const debts = ctx.wizard.state.debts;
 
         if (isNaN(choiceIndex) || !debts[choiceIndex]) {
-            ctx.reply('❌ Не понял, выберите кнопку из меню.');
-            return; // Не переходим дальше, ждем правильного нажатия
+            ctx.reply('❌ Не зрозумів, виберіть кнопку з меню.');
+            return;
         }
 
-        const { row } = debts[choiceIndex]; // Берем нужную строку из гугл таблицы
+        const { row } = debts[choiceIndex];
 
-        await ctx.reply('⏳ Отмечаю оплату...');
+        await ctx.reply('⏳ Відмічаю оплату...');
 
         try {
-            // ОБНОВЛЕНИЕ СТАТУСА
-            row.set('Статус', 'Оплачено'); // Меняем значение в памяти
-            await row.save(); // Отправляем изменение в Гугл (САМЫЙ ВАЖНЫЙ МОМЕНТ)
+            row.set('Статус', 'Оплачено');
+            await row.save();
 
             await ctx.reply(
-                `✅ **Долг погашен!**\n${row.get('Марка')} — ${row.get('Цена')} грн`, 
+                `✅ **Борг погашено!**\n${row.get('Марка')} — ${row.get('Ціна')} грн`, 
                 { parse_mode: 'Markdown', ...mainMenu }
             );
         } catch (e) {
             console.error(e);
-            await ctx.reply('❌ Ошибка при обновлении таблицы.', mainMenu);
+            await ctx.reply('❌ Помилка при оновленні таблиці.', mainMenu);
         }
 
         return ctx.scene.leave();
@@ -369,31 +361,32 @@ const repayScene = new Scenes.WizardScene(
 );
 
 const leaveScene = (ctx) => {
-    ctx.reply('❌ Отменено', mainMenu);
+    ctx.reply('❌ Скасовано', mainMenu);
     return ctx.scene.leave();
 };
 
-// --- ЗАПУСК И ОБРАБОТЧИКИ ---
+// --- ЗАПУСК ТА ОБРОБНИКИ ---
 const bot = new Telegraf(process.env.BOT_TOKEN);
 const stage = new Scenes.Stage([reportWizard, searchScene, repayScene]);
 
 bot.use(session());
 bot.use(stage.middleware());
 
-bot.command('start', (ctx) => ctx.reply('Главное меню:', mainMenu));
+bot.command('start', (ctx) => ctx.reply('Головне меню:', mainMenu));
 
-// 1. Обработка Главного меню
-bot.hears('Добавить заказ', (ctx) => ctx.scene.enter('REPORT_SCENE'));
-bot.hears('Отчеты', (ctx) => ctx.reply('Выберите период:', reportsMenu));
+// 1. Головне меню (українською)
+bot.hears('Додати замовлення', (ctx) => ctx.scene.enter('REPORT_SCENE'));
+bot.hears('Звіти', (ctx) => ctx.reply('Оберіть період:', reportsMenu));
+bot.hears('Пошук за номером', (ctx) => ctx.scene.enter('SEARCH_SCENE'));
+bot.hears('Погасити борг', (ctx) => ctx.scene.enter('REPAY_SCENE'));
 
-// 2. Обработка Меню отчетов
-bot.hears('За сегодня', (ctx) => getDailyReport(ctx));
-bot.hears('За неделю', (ctx) => getWeeklyReport(ctx));
-bot.hears('Назад', (ctx) => ctx.reply('Главное меню:', mainMenu));
-bot.hears('Поиск по номеру', (ctx) => ctx.scene.enter('SEARCH_SCENE'));
-bot.hears('Погасить долг', (ctx) => ctx.scene.enter('REPAY_SCENE'));
+// 2. Меню звітів (українською)
+bot.hears('За сьогодні', (ctx) => getDailyReport(ctx));
+bot.hears('За тиждень', (ctx) => getWeeklyReport(ctx));
+bot.hears('Назад', (ctx) => ctx.reply('Головне меню:', mainMenu));
+
 bot.launch();
-console.log('🤖 Бот обновлен и запущен!');
+console.log('🤖 Бот оновлений та запущений (UA)!');
 
 process.once('SIGINT', () => bot.stop('SIGINT'));
 process.once('SIGTERM', () => bot.stop('SIGTERM'));
