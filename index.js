@@ -385,8 +385,20 @@ bot.hears('За сьогодні', (ctx) => getDailyReport(ctx));
 bot.hears('За тиждень', (ctx) => getWeeklyReport(ctx));
 bot.hears('Назад', (ctx) => ctx.reply('Головне меню:', mainMenu));
 
+// ... тут твій старий код ...
 bot.launch();
 console.log('🤖 Бот оновлений та запущений (UA)!');
+
+// --- ДОДАЙ ЦЕЙ БЛОК ДЛЯ RENDER ---
+const http = require('http');
+const PORT = process.env.PORT || 3000; // Render сам дасть нам порт
+http.createServer((req, res) => {
+    res.write('Bot is running!'); // Просто пишемо, що бот живий
+    res.end();
+}).listen(PORT, () => {
+    console.log(`Server is listening on port ${PORT}`);
+});
+// ---------------------------------
 
 process.once('SIGINT', () => bot.stop('SIGINT'));
 process.once('SIGTERM', () => bot.stop('SIGTERM'));
